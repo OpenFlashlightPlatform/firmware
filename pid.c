@@ -1,36 +1,11 @@
 
+
+#include "bluesun.h"
+
+#include <stdint.h>
+
 #define MIN_SAMPLE_INTERVAL 100 //0.1 ms
 
-typedef struct
-{
-  //Tuning parameters
-  //The monotonic system time at the last pid step
-  uint64_t last_time;
-  //The desired value of the measured quantity (input)
-  double setpoint;
-  //P constant
-  double kp;
-  //I constant
-  double ki;
-  //D constant
-  double kd;
-  //How frequently to step
-  uint64_t step_interval_us;
-  //The maximum value permitted on the output
-  double output_maximum_clamp;
-  //The minimum value permitted on the output
-  double output_minimum_clamp;
-
-  //PID state
-  //Integrative term
-  double iterm;
-  //The value of the input on the last step
-  double last_input;
-  //If the PID is disabled
-  bool enabled;
-  //The output
-  double output;
-} pid_t;
 
 /*working variables*/
 // unsigned long lastTime;
@@ -44,18 +19,13 @@ typedef struct
 // #define MANUAL 0
 // #define AUTOMATIC 1
 
-double pid_step(pid_t *p, double input)
+double pid_step(pid_controller_t *p, double input)
 {
   //Do not change any values if the PID is disabled
   if (!p->enabled) {
-    return;
+    return -1;
   }
-  uint64_t now = now_in_us();
-  int32_t time_since_last_step = (now - p->last_time);
-  //Do not step if insufficient time has passed
-  if (time_since_last_step < p->sample_interval_us) {
-    return;
-  }
+
   //Calculate the difference between the intended observed value
   //and the actual observed value
   double error = p->setpoint - input;
@@ -87,39 +57,39 @@ double pid_step(pid_t *p, double input)
                (p->kd * -input_delta));
 
   //Clamp the output
-  if (output > p->output_maximium_clamp) {
-    output = p->output_maximum_clamp;
+  if (p->output > p->output_maximum_clamp) {
+    p->output = p->output_maximum_clamp;
   }
-  if (output < p->output_minimum_clamp) {
-    output = p->output_minimum_clamp;
+  if (p->output < p->output_minimum_clamp) {
+    p->output = p->output_minimum_clamp;
   }
 
   //Store state needed for next time
   p->last_input = input;
-  p->last_time = now;
+
+  return p->output;
 }
 
-void pid_set_tuning(pid_t *p, double kp, double ki, double kd)
+void pid_set_tuning(pid_controller_t *p, double kp, double ki, double kd)
 {
-  double sample_interval_sec = ((double)p->sample_interval_us) / 1000000;
   p->kp = kp;
-  p->ki = ki*sample_interval_sec;
-  p->kd = kd*sample_interval_sec;
+  p->ki = ki;
+  p->kd = kd;
 }
 
-void pid_set_sample_interval(pid_t *p, uint64_t new_sample_interval_us)
-{
-  if (new_sample_interval_us > MIN_SAMPLE_INTERVAL)
-  {
-    double ratio = (double) new_sample_interval_us /
-                   (double) p->sample_interval_us;
-    p->ki *= ratio;
-    p->kd /= ratio;
-    p->sample_interval_us = new_sample_interval_us;
-  }
-}
+// void pid_set_sample_interval(pid_t *p, uint64_t new_sample_interval_us)
+// {
+//   if (new_sample_interval_us > MIN_SAMPLE_INTERVAL)
+//   {
+//     double ratio = (double) new_sample_interval_us /
+//                    (double) p->sample_interval_us;
+//     p->ki *= ratio;
+//     p->kd /= ratio;
+//     p->sample_interval_us = new_sample_interval_us;
+//   }
+// }
 
-void pid_set_output_clamp(pid_t *p, double min, double max)
+void pid_set_output_clamp(pid_controller_t *p, double min, double max)
 {
   if(min < max) {
     return;
@@ -144,16 +114,9 @@ void pid_set_output_clamp(pid_t *p, double min, double max)
   }
 }
 
-void pid_set_enabled(pid_t *p, bool enabled, double input)
-{
-  if (enabled && !p->enabled) {
-    pid_initialize(p, input);
-  }
-  p->enabled = enabled;
-}
 //Used to make sure that upon enabling the PID controller, there
 //is not a transient
-static void pid_initialize(pid_t *p, double input)
+static void pid_initialize(pid_controller_t *p, double input)
 {
   p->last_input = input;
   p->iterm = p->output;
@@ -165,3 +128,12 @@ static void pid_initialize(pid_t *p, double input)
     p->iterm = p->output_minimum_clamp;
   }
 }
+
+void pid_set_enabled(pid_controller_t *p, uint8_t enabled, double input)
+{
+  if (enabled && !p->enabled) {
+    pid_initialize(p, input);
+  }
+  p->enabled = enabled;
+}
+
